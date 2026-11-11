@@ -8,7 +8,11 @@ venv/
 # Cursor / IDE
 .cursor/
 .vscode/
+.cursorrules
 
 # Output reports & temporary audit files
 audit_report.md
+audit_findings.csv
 sample_data/
+
+SPEC.md
