@@ -11,3 +11,7 @@ A programmer looks at the Technical Specification  and identifies the entities:
 
 Entity 1: class
 Entity 2: class
+
+ ## The desire to expand the set of rules in `patterns.py`
+
+**Answer AI:** The AI ​​explained that this would be excessive, the current, limited number of rules already covers most of the primary names, and expanding the list or adding synonyms could lead to the accidental exclusion of entirely different names.

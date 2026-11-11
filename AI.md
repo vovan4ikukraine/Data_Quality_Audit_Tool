@@ -1,8 +1,8 @@
 ### GEMIMI (tips, primary discussion, workflow, primary architechture)
 ### CURSOR 
-    *(GROK)* - final specification
-    *(GROK, Composer)* - code by 1 module
-    *(GROK)* - tests, debugging
+*(GROK)* - final specification
+*(GROK, Composer)* - code by 1 module
+*(GROK)* - tests, debugging
 
 ## GEMIMI Initial proposal of a topic without detailed consideration.
 (Misconception regarding the level of complexity, coupled with a proposed solution.)
@@ -20,3 +20,6 @@
     - **The problem:** Heavy conceptual architecture.
 
     - **The solution:** Breaking down modules into micro-levels. One file - one responsibility.
+
+   ## GROK 
+   **The problem:** generated `patterns.py` - word tokenization was limited with _ or - I added a space as a delimiter, since it is frequently used in tables.
