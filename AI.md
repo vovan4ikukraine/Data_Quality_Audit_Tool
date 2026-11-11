@@ -1,8 +1,8 @@
 ### GEMIMI (tips, primary discussion, workflow, primary architechture)
 ### CURSOR 
-    *(Claude Sonnet)* - final specification
-    *(Claude Sonnet, Composer)* - code by 1 module
-    *(GPT)* - tests, debugging
+    *(GROK)* - final specification
+    *(GROK, Composer)* - code by 1 module
+    *(GROK)* - tests, debugging
 
 ## GEMIMI Initial proposal of a topic without detailed consideration.
 (Misconception regarding the level of complexity, coupled with a proposed solution.)
@@ -16,3 +16,7 @@
     - **The problem:** At an early stage, the AI ​​suggested implementing automatic correction and overwriting of the original CSV file.
 
     - **The solution:** The program is not a replacement for a data analyst; automated correction would require a highly sophisticated, extremely precise, and comprehensive solution capable of handling a vast array of variations across different fields, domains, and naming conventions. For this compact program, an audit based approach was chosen: it identifies problematic areas and ranks them by priority distinguishing between data that requires immediate correction and data that simply warrants attention.
+
+    - **The problem:** Heavy conceptual architecture.
+
+    - **The solution:** Breaking down modules into micro-levels. One file - one responsibility.
