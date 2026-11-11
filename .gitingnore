@@ -1,0 +1,14 @@
+# Python environment & cache
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.env
+
+# Cursor / IDE
+.cursor/
+.vscode/
+
+# Output reports & temporary audit files
+audit_report.md
+sample_data/
