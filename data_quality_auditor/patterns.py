@@ -8,7 +8,7 @@ DATE_SUFFIX_TOKEN = "at"
 
 _ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
 _CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
-_SEPARATORS = re.compile(r"[_-]+")
+_SEPARATORS = re.compile(r"[\s_-]+")
 
 
 def tokenize(name: str) -> tuple[str, ...]:
