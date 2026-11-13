@@ -1,0 +1,6 @@
+email
+ada@example.com
+not-an-email
+bad @example.com
+two@@example.com
+nodot@localhost

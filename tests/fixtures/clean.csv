@@ -1,0 +1,4 @@
+id,amount,created_at,status
+1,10,2024-01-02,Paid
+2,12.5,2024-01-03,Open
+3,8,2024-01-04,Paid
