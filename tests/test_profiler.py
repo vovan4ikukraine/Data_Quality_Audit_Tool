@@ -238,6 +238,21 @@ def test_a_date_name_stays_datetime_when_the_values_do_not_parse():
     assert column.datetime_values.isna().all()
 
 
+def test_a_date_name_with_a_mixed_numeric_dialect_stays_text():
+    column = passport(
+        "event_date",
+        ["12,50", "12,50", "1.234,56", "1,234", "1,234.56", "2,000"],
+    )
+
+    assert column.mixed_numeric_dialect is True
+    assert column.profile.kind is ColumnKind.TEXT
+    assert column.numeric_values is None
+    assert column.datetime_values is None
+    assert column.profile.recognized_format is None
+    assert column.mixed_datetime_formats is False
+    assert column.ambiguous_day_month is False
+
+
 def test_an_unambiguous_day_and_month_order_is_chosen():
     day_first = passport("when", ["13/01/2024", "05/06/2024"])
     month_first = passport("when", ["01/13/2024", "06/05/2024"])

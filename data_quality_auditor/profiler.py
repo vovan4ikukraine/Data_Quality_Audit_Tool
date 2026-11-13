@@ -159,7 +159,9 @@ def _infer_kind(
             return ColumnKind.DATETIME
         if epoch_unit is not None:
             return ColumnKind.NUMERIC
-        if not numbers.mixed and numbers.rate >= MAJORITY_SHARE:
+        if numbers.mixed:
+            return ColumnKind.TEXT
+        if numbers.rate >= MAJORITY_SHARE:
             return ColumnKind.NUMERIC
         return ColumnKind.DATETIME
     if not numbers.mixed and numbers.rate >= MAJORITY_SHARE:
