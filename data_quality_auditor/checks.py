@@ -5,18 +5,19 @@ import pandas as pd
 from data_quality_auditor.loader import SENTINELS, RawTable
 from data_quality_auditor.models import ColumnKind, Finding, Severity
 from data_quality_auditor.patterns import is_identifier_name
+from data_quality_auditor.policy import (
+    CATEGORY_CARDINALITY,
+    CONSTANT_MINIMUM,
+    EXAMPLE_ROW_LIMIT,
+    NEAR_UNIQUE_RATIO,
+    NON_NEGATIVE_SHARE,
+    OUTLIER_DISTINCT_LIMIT,
+    OUTLIER_FENCE,
+    OUTLIER_MINIMUM,
+    RARE_NEGATIVE_SHARE,
+    missing_severity,
+)
 from data_quality_auditor.profiler import ColumnPassport
-
-NEAR_UNIQUE_RATIO = 0.98
-MISSING_WARNING_SHARE = 0.05
-NON_NEGATIVE_SHARE = 0.95
-RARE_NEGATIVE_SHARE = 0.05
-CATEGORY_CARDINALITY = 50
-OUTLIER_MINIMUM = 30
-OUTLIER_FENCE = 1.5
-OUTLIER_DISTINCT_LIMIT = 10
-CONSTANT_MINIMUM = 20
-EXAMPLE_ROW_LIMIT = 5
 
 _AFFECTED_COLUMNS = (
     "column",
@@ -155,11 +156,7 @@ def _absence_hits(column: _Column) -> list[tuple[Finding, pd.DataFrame]]:
     hits = []
     blank_count = int(column.blank.sum())
     if blank_count:
-        severity = (
-            Severity.WARNING
-            if blank_count / column.population >= MISSING_WARNING_SHARE
-            else Severity.SUGGESTION
-        )
+        severity = missing_severity(blank_count / column.population)
         _collect(
             hits,
             _hit(

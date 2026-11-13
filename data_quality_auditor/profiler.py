@@ -11,9 +11,8 @@ from data_quality_auditor.patterns import (
     is_epoch_name,
     is_identifier_name,
 )
+from data_quality_auditor.policy import MAJORITY_SHARE, MIXED_DIALECT_COUNT
 
-MAJORITY_SHARE = 0.90
-MIXED_DIALECT_COUNT = 3
 SHORT_TEXT_LIMIT = 50
 FREQUENT_VALUE_LIMIT = 5
 
