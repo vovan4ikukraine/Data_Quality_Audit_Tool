@@ -362,6 +362,60 @@ def test_number_stored_as_text_and_the_other_sheet(tmp_path):
     assert other.findings == ()
 
 
+def test_a_formula_without_a_cached_value_is_not_a_parse_error(tmp_path):
+    book = Workbook()
+    sheet = book.active
+    sheet["A1"] = "last_bar_ts"
+    sheet["B1"] = "label"
+    for row in range(2, 5):
+        sheet[f"A{row}"] = f'=IF(ISBLANK(B{row}),"N/A",B{row})'
+        sheet[f"B{row}"] = "x"
+    path = tmp_path / "formulas.xlsx"
+    book.save(path)
+
+    table, result = audit(path)
+    item = one(result, "formula_value_unavailable", "last_bar_ts")
+
+    assert table.cell_types.loc[2, "last_bar_ts"] == "f"
+    assert "datetime_parse_failure" not in {finding.check_id for finding in result.findings}
+    assert item.severity is Severity.WARNING
+    assert item.row_count == 3
+    assert item.example.startswith("=")
+    assert "could not be read as a value" in item.message
+
+
+def test_a_cached_formula_result_is_read_as_the_value(tmp_path):
+    book = Workbook()
+    sheet = book.active
+    sheet["A1"] = "amount"
+    sheet["A2"] = "=1+1"
+    path = tmp_path / "cached.xlsx"
+    book.save(path)
+    _store_formula_cache(path, "2")
+
+    table, result = audit(path)
+
+    assert table.frame.loc[2, "amount"] == "2"
+    assert table.cell_types.loc[2, "amount"] == "n"
+    assert "formula_value_unavailable" not in {finding.check_id for finding in result.findings}
+
+
+def _store_formula_cache(path, value):
+    from io import BytesIO
+    import zipfile
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(buffer, "w") as output:
+        for item in source.infolist():
+            payload = source.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet"):
+                text = payload.decode("utf-8")
+                text = text.replace("</f>", f"</f><v>{value}</v>")
+                payload = text.encode("utf-8")
+            output.writestr(item, payload)
+    path.write_bytes(buffer.getvalue())
+
+
 def test_semicolon_file_that_is_not_utf8(tmp_path):
     path = tmp_path / "latin.csv"
     path.write_bytes("city;amount\ncafé;12,50\nlyon;-\n".encode("latin-1"))

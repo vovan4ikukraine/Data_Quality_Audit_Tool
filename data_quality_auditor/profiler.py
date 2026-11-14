@@ -80,13 +80,24 @@ def profile_table(table: RawTable) -> tuple[ColumnPassport, ...]:
     frame = table.frame
     kept = frame.drop(index=list(table.empty_row_numbers), errors="ignore")
     return tuple(
-        _profile_column(str(name), frame[name], kept[name]) for name in frame.columns
+        _profile_column(str(name), frame[name], kept[name], _formula_mask(table, kept, name))
+        for name in frame.columns
     )
 
 
-def _profile_column(name: str, values: pd.Series, kept: pd.Series) -> ColumnPassport:
+def _formula_mask(table: RawTable, kept: pd.DataFrame, name: str) -> pd.Series:
+    if table.cell_types is None:
+        return pd.Series(False, index=kept.index)
+    return table.cell_types[name].eq("f").reindex(kept.index).fillna(False).astype(bool)
+
+
+def _profile_column(
+    name: str, values: pd.Series, kept: pd.Series, formula: pd.Series
+) -> ColumnPassport:
     blank, sentinel = _blank_and_sentinel(kept)
-    content = kept.loc[~(blank | sentinel)]
+    blank = blank & ~formula
+    sentinel = sentinel & ~formula
+    content = kept.loc[~(blank | sentinel | formula)]
     distinct_count = int(content.nunique())
     numbers = _read_numbers(content)
     dates = _read_dates(content, is_date_name(name))

@@ -45,6 +45,7 @@ class _Column:
     blank: pd.Series
     sentinel: pd.Series
     edge: pd.Series
+    formula: pd.Series
     population: int
     cell_types: pd.Series | None
     numbers: pd.Series | None
@@ -81,6 +82,7 @@ def _column_hits(
 ) -> list[tuple[Finding, pd.DataFrame]]:
     column = _view(table, kept, name, passport)
     hits: list[tuple[Finding, pd.DataFrame]] = []
+    _collect(hits, _unresolved_formula(column))
     hits.extend(_absence_hits(column))
     hits.extend(_whitespace_hits(column))
     _collect(hits, _case_collision(column))
@@ -103,15 +105,20 @@ def _view(
     table: RawTable, kept: pd.DataFrame, name: object, passport: ColumnPassport
 ) -> _Column:
     values = kept[name].fillna("").astype(str)
-    blank, sentinel = _blank_and_sentinel(values)
-    substantive = ~(blank | sentinel)
     index = values.index
-    ambiguous = _align(passport.ambiguous_rows, index)
-    if ambiguous is not None:
-        ambiguous = ambiguous.fillna(False).astype(bool)
     cell_types = None
     if table.cell_types is not None:
         cell_types = table.cell_types.loc[index, name]
+    formula = pd.Series(False, index=index)
+    if cell_types is not None:
+        formula = cell_types.eq("f").reindex(index).fillna(False).astype(bool)
+    blank, sentinel = _blank_and_sentinel(values)
+    blank = blank & ~formula
+    sentinel = sentinel & ~formula
+    substantive = ~(blank | sentinel | formula)
+    ambiguous = _align(passport.ambiguous_rows, index)
+    if ambiguous is not None:
+        ambiguous = ambiguous.fillna(False).astype(bool)
     return _Column(
         name=passport.profile.name,
         passport=passport,
@@ -119,6 +126,7 @@ def _view(
         blank=blank,
         sentinel=sentinel,
         edge=values.ne(values.str.strip()) & substantive,
+        formula=formula,
         population=len(values),
         cell_types=cell_types,
         numbers=_align(passport.numeric_values, index),
@@ -141,7 +149,7 @@ def _absence_hits(column: _Column) -> list[tuple[Finding, pd.DataFrame]]:
                 "An identifier is blank or a placeholder.",
             )
         )
-    if profile.distinct_count == 0:
+    if profile.distinct_count == 0 and not bool(column.formula.any()):
         return _only(
             _hit(
                 "all_null_column",
@@ -417,11 +425,23 @@ def _email_format(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
     )
 
 
+def _unresolved_formula(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
+    return _hit(
+        "formula_value_unavailable",
+        Severity.WARNING,
+        column.name,
+        column.formula,
+        column.population,
+        column.values,
+        "The formula could not be read as a value.",
+    )
+
+
 def _duplicate_values(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
     profile = column.passport.profile
     if profile.distinct_ratio < NEAR_UNIQUE_RATIO:
         return None
-    raw = column.values.loc[~(column.blank | column.sentinel)]
+    raw = column.values.loc[~(column.blank | column.sentinel | column.formula)]
     if raw.empty:
         return None
     repeated = raw.map(raw.value_counts()).gt(1)
@@ -451,7 +471,7 @@ def _duplicate_values(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
 
 def _constant_column(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
     profile = column.passport.profile
-    substantive = ~(column.blank | column.sentinel)
+    substantive = ~(column.blank | column.sentinel | column.formula)
     if profile.distinct_count != 1 or int(substantive.sum()) < CONSTANT_MINIMUM:
         return None
     return _hit(
@@ -534,7 +554,7 @@ def _trim_collision(values: pd.Series, substantive: pd.Series) -> pd.Series:
 
 
 def _unexplained(column: _Column) -> pd.Series:
-    return ~(column.blank | column.sentinel | column.edge)
+    return ~(column.blank | column.sentinel | column.edge | column.formula)
 
 
 def _true_mask(column: _Column) -> pd.Series:

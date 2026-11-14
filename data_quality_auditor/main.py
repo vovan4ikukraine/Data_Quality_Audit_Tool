@@ -2,12 +2,32 @@ import sys
 from pathlib import Path
 
 from data_quality_auditor.checks import check_table
-from data_quality_auditor.loader import LoadError, auditable_sheets, load_file
+from openpyxl.utils import get_column_letter
+
+from data_quality_auditor.loader import (
+    LoadError,
+    auditable_sheets,
+    column_blocks,
+    load_file,
+    take_columns,
+)
 from data_quality_auditor.policy import apply_policy
 from data_quality_auditor.profiler import profile_table
 from data_quality_auditor.report import write_report
 
-_INPUT_SUFFIXES = frozenset({".csv", ".xlsx"})
+_INPUT_SUFFIXES = frozenset({".csv", ".xlsx", ".xlsm"})
+_EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
+
+
+def audit_table(
+    table,
+    output_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    columns = profile_table(table)
+    result = check_table(table, columns)
+    findings, affected_rows = apply_policy(result.findings, result.affected_rows)
+    destination = _reports_dir() if output_dir is None else output_dir
+    return write_report(table, columns, findings, affected_rows, destination)
 
 
 def audit_file(
@@ -15,12 +35,7 @@ def audit_file(
     sheet: str | None = None,
     output_dir: str | Path | None = None,
 ) -> tuple[Path, Path]:
-    table = load_file(path, sheet)
-    columns = profile_table(table)
-    result = check_table(table, columns)
-    findings, affected_rows = apply_policy(result.findings, result.affected_rows)
-    destination = _reports_dir() if output_dir is None else output_dir
-    return write_report(table, columns, findings, affected_rows, destination)
+    return audit_table(load_file(path, sheet), output_dir)
 
 
 def main() -> int:
@@ -30,7 +45,7 @@ def main() -> int:
     folder = _prepare_input_dir()
     if folder is None:
         return 1
-    print(f"Place CSV and XLSX files in {folder}.")
+    print(f"Place CSV, XLSX, and XLSM files in {folder}.")
     print()
     files = _input_files(folder)
     if not files:
@@ -41,21 +56,26 @@ def main() -> int:
     if chosen is None:
         return 1
     sheet = None
-    if chosen.suffix.lower() == ".xlsx":
+    if chosen.suffix.lower() in _EXCEL_SUFFIXES:
         sheet = _choose_sheet(chosen)
         if sheet is None:
             return 1
     try:
-        report_path, findings_path = audit_file(chosen, sheet)
+        table = load_file(chosen, sheet)
+        blocks = column_blocks(table.frame)
+        if len(blocks) > 1:
+            print("This sheet has more than one table.")
+            choice = _choose_number("Choose a table:", tuple(_block_label(*block) for block in blocks))
+            if choice is None:
+                return 1
+            table = take_columns(table, *blocks[choice - 1])
+        report_path, findings_path = audit_table(table)
     except LoadError as error:
-        if chosen.suffix.lower() == ".xlsx":
-            print("The file could not be processed.")
-            _pause()
-        else:
-            print(error, file=sys.stderr)
+        print(error, file=sys.stderr)
+        _pause()
         return 1
     except Exception:
-        print("The file could not be processed.")
+        print("The file could not be processed.", file=sys.stderr)
         _pause()
         return 1
     print(f"Wrote {report_path}")
@@ -109,8 +129,8 @@ def _choose_file(files: tuple[Path, ...]) -> Path | None:
 def _choose_sheet(path: Path) -> str | None:
     try:
         sheets = auditable_sheets(path)
-    except LoadError:
-        print("The file could not be processed.")
+    except LoadError as error:
+        print(error, file=sys.stderr)
         _pause()
         return None
     if not sheets:
@@ -121,6 +141,14 @@ def _choose_sheet(path: Path) -> str | None:
     if choice is None:
         return None
     return sheets[choice - 1]
+
+
+def _block_label(start: int, end: int) -> str:
+    left = get_column_letter(start + 1)
+    right = get_column_letter(end)
+    if left == right:
+        return f"Column {left}"
+    return f"Columns {left}-{right}"
 
 
 def _choose_number(title: str, labels: tuple[str, ...]) -> int | None:

@@ -1,6 +1,6 @@
 import csv
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -10,7 +10,7 @@ from charset_normalizer import from_bytes
 from openpyxl.packaging.relationship import get_dependents, get_rels_path
 from openpyxl.reader.excel import ExcelReader
 from openpyxl.styles.stylesheet import apply_stylesheet
-from openpyxl.worksheet._reader import WorkSheetParser
+from openpyxl.worksheet._reader import FORMULA_TAG, WorkSheetParser
 
 SENTINELS = frozenset({"na", "n/a", "null", "none", "-", "--", "?", "#n/a"})
 DELIMITERS = (",", ";", "\t", "|")
@@ -19,10 +19,28 @@ _OLE_HEADER = b"\xd0\xcf\x11\xe0"
 _ZIP_HEADER = b"PK"
 _PIVOT_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable"
 _COULD_NOT_PROCESS = "The file could not be processed."
+_EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
+_FILE_IN_USE = (
+    "The file is open in another program and could not be read. Close it and try again."
+)
 
 
 class LoadError(Exception):
     pass
+
+
+class _CachedFormulaParser(WorkSheetParser):
+    def parse_cell(self, element):
+        cell = super().parse_cell(element)
+        formula = element.find(FORMULA_TAG)
+        if formula is None or cell["value"] is not None:
+            return cell
+        text = formula.text or ""
+        if text and not text.startswith("="):
+            text = f"={text}"
+        cell["value"] = text or None
+        cell["data_type"] = "f"
+        return cell
 
 
 @dataclass(frozen=True)
@@ -61,8 +79,8 @@ def is_blank_or_sentinel(value: str) -> bool:
 
 def auditable_sheets(path: str | Path) -> tuple[str, ...]:
     source = _require_file(path)
-    if source.suffix.lower() != ".xlsx":
-        raise LoadError("The sheet option applies to .xlsx files.")
+    if source.suffix.lower() not in _EXCEL_SUFFIXES:
+        raise LoadError("The sheet option applies to .xlsx and .xlsm files.")
     payload = _read_bytes(source)
     _require_xlsx_container(payload)
     package = _open_package(payload)
@@ -77,13 +95,13 @@ def load_file(path: str | Path, sheet: str | None = None) -> RawTable:
     suffix = source.suffix.lower()
     if suffix == ".xls":
         raise LoadError(
-            "Legacy .xls workbooks are not supported. Save the file as .xlsx or .csv."
+            "Legacy .xls workbooks are not supported. Save the file as .xlsx, .xlsm, or .csv."
         )
-    if suffix not in {".csv", ".xlsx"}:
+    if suffix not in {".csv", *_EXCEL_SUFFIXES}:
         label = suffix if suffix else "no extension"
-        raise LoadError(f"Unsupported file format '{label}'. Use .csv or .xlsx.")
+        raise LoadError(f"Unsupported file format '{label}'. Use .csv, .xlsx, or .xlsm.")
     if suffix == ".csv" and sheet is not None:
-        raise LoadError("The sheet option applies to .xlsx files.")
+        raise LoadError("The sheet option applies to .xlsx and .xlsm files.")
     payload = _read_bytes(source)
     if suffix == ".csv":
         return _load_csv(source, payload)
@@ -102,9 +120,10 @@ def _require_file(path: str | Path) -> Path:
 def _read_bytes(path: Path) -> bytes:
     try:
         payload = path.read_bytes()
-    except PermissionError as exc:
-        raise LoadError(f"Permission denied: {path}") from exc
     except OSError as exc:
+        winerror = getattr(exc, "winerror", None)
+        if isinstance(exc, PermissionError) or winerror in {32, 33}:
+            raise LoadError(_FILE_IN_USE) from exc
         raise LoadError(f"The file could not be read: {path}") from exc
     if not payload:
         raise LoadError(f"The file is empty: {path}")
@@ -290,7 +309,7 @@ def _has_values(package: ExcelReader, target: str) -> bool:
             parser = _sheet_parser(package, source)
             for _row_number, cells in parser.parse():
                 for cell in cells:
-                    if _excel_text(cell["value"]) != "":
+                    if _cell_has_content(cell):
                         return True
     except Exception:
         return False
@@ -330,7 +349,7 @@ def _read_sheet(
         last_row = max(last_row, row_number)
         for cell in cells:
             lookup[(row_number, cell["column"])] = cell
-            if _excel_text(cell["value"]) != "":
+            if _cell_has_content(cell):
                 last_column = max(last_column, cell["column"])
     if last_column == 0:
         raise LoadError(f"The sheet is empty: {sheet.name}")
@@ -360,17 +379,60 @@ def _read_sheet(
 
 def _sheet_parser(package: ExcelReader, source) -> WorkSheetParser:
     workbook = package.wb
-    return WorkSheetParser(
+    return _CachedFormulaParser(
         source,
         package.shared_strings,
-        data_only=False,
+        data_only=True,
         epoch=workbook.epoch,
         date_formats=set(getattr(workbook, "_date_formats", ())),
         timedelta_formats=set(getattr(workbook, "_timedelta_formats", ())),
     )
 
 
+def _cell_has_content(cell: dict) -> bool:
+    return cell.get("data_type") == "f" or _excel_text(cell["value"]) != ""
+
+
+def column_blocks(frame: pd.DataFrame) -> tuple[tuple[int, int], ...]:
+    gaps = []
+    for name in frame.columns:
+        values = frame[name].fillna("").astype(str)
+        empty_header = str(name).strip() == ""
+        empty_cells = bool(values.str.strip().eq("").all())
+        gaps.append(empty_header and empty_cells)
+    blocks: list[tuple[int, int]] = []
+    start = None
+    for index, is_gap in enumerate(gaps):
+        if is_gap:
+            if start is not None:
+                blocks.append((start, index))
+                start = None
+            continue
+        if start is None:
+            start = index
+    if start is not None:
+        blocks.append((start, len(gaps)))
+    if not blocks and len(frame.columns):
+        return ((0, len(frame.columns)),)
+    return tuple(blocks)
+
+
+def take_columns(table: RawTable, start: int, end: int) -> RawTable:
+    frame = table.frame.iloc[:, start:end].copy()
+    cell_types = None
+    if table.cell_types is not None:
+        cell_types = table.cell_types.iloc[:, start:end].copy()
+    return replace(
+        table,
+        frame=frame,
+        cell_types=cell_types,
+        empty_row_numbers=_empty_row_numbers(frame),
+    )
+
+
 def _parsed_type(cell: dict) -> str:
+    if cell.get("data_type") == "f":
+        return "f"
     if _excel_text(cell["value"]) == "":
         return ""
     if cell["data_type"] == "d":

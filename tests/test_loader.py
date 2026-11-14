@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
@@ -303,3 +304,51 @@ def test_xlsx_offers_data_sheets_and_skips_charts_and_pivots(tmp_path):
         load_file(path, sheet="Chart")
     with pytest.raises(LoadError, match="could not be processed"):
         load_file(path, sheet="Pivot")
+
+
+def test_xlsm_is_read_like_a_workbook(tmp_path):
+    table = load_file(workbook(tmp_path / "book.xlsm"))
+    assert table.sheet == "Orders"
+    assert table.frame.loc[2, "amount"] == "12.5"
+
+
+def test_a_workbook_open_in_another_program_is_reported(tmp_path, monkeypatch):
+    path = tmp_path / "busy.xlsx"
+    path.write_bytes(b"PK\x03\x04")
+
+    def locked(self):
+        error = PermissionError(13, "denied")
+        error.winerror = 32
+        raise error
+
+    monkeypatch.setattr(Path, "read_bytes", locked)
+    with pytest.raises(LoadError, match="open in another program"):
+        load_file(path)
+
+
+def test_side_by_side_tables_stay_separate(tmp_path):
+    from data_quality_auditor.loader import column_blocks, take_columns
+
+    book = Workbook()
+    sheet = book.active
+    sheet["A1"] = "name"
+    sheet["B1"] = "age"
+    sheet["A2"] = "Ada"
+    sheet["B2"] = 30
+    sheet["D1"] = "city"
+    sheet["E1"] = "code"
+    sheet["D2"] = "Paris"
+    sheet["E2"] = "75000"
+    path = tmp_path / "sides.xlsx"
+    book.save(path)
+
+    table = load_file(path)
+    blocks = column_blocks(table.frame)
+    left = take_columns(table, *blocks[0])
+    right = take_columns(table, *blocks[1])
+
+    assert blocks == ((0, 2), (3, 5))
+    assert list(left.frame.columns) == ["name", "age"]
+    assert list(right.frame.columns) == ["city", "code"]
+    assert left.frame.loc[2, "name"] == "Ada"
+    assert right.frame.loc[2, "city"] == "Paris"
