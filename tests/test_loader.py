@@ -245,3 +245,61 @@ def test_ole_workbook_is_rejected(tmp_path):
     path.write_bytes(b"\xd0\xcf\x11\xe0rest")
     with pytest.raises(LoadError, match="password-protected or saved in the legacy"):
         load_file(path)
+
+
+def test_xlsx_offers_data_sheets_and_skips_charts_and_pivots(tmp_path):
+    from io import BytesIO
+    import zipfile
+
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.packaging.relationship import get_rels_path
+    from openpyxl.reader.excel import ExcelReader
+
+    from data_quality_auditor.loader import auditable_sheets
+
+    path = tmp_path / "book.xlsx"
+    book = Workbook()
+    orders = book.active
+    orders.title = "Orders"
+    orders["A1"] = "amount"
+    orders["A2"] = 10
+    chart = BarChart()
+    chart.add_data(Reference(orders, min_col=1, min_row=1, max_row=2), titles_from_data=True)
+    orders.add_chart(chart, "C2")
+    book.create_chartsheet("Chart")
+    pivot = book.create_sheet("Pivot")
+    pivot["A1"] = "total"
+    book.save(path)
+
+    package = ExcelReader(path, read_only=True, keep_links=False)
+    package.read_manifest()
+    package.read_workbook()
+    target = next(
+        rel.target for sheet, rel in package.parser.find_sheets() if sheet.name == "Pivot"
+    )
+    package.archive.close()
+    rels_path = get_rels_path(target)
+    pivot_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId9" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" '
+        'Target="../pivotTables/pivotTable1.xml"/>'
+        "</Relationships>"
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(buffer, "w") as output:
+        for item in source.infolist():
+            if item.filename != rels_path:
+                output.writestr(item, source.read(item.filename))
+        output.writestr(rels_path, pivot_rels)
+    path.write_bytes(buffer.getvalue())
+
+    assert auditable_sheets(path) == ("Orders",)
+    table = load_file(path, sheet="Orders")
+    assert table.frame.loc[2, "amount"] == "10"
+    assert table.other_sheets == ("Chart", "Pivot")
+    with pytest.raises(LoadError, match="could not be processed"):
+        load_file(path, sheet="Chart")
+    with pytest.raises(LoadError, match="could not be processed"):
+        load_file(path, sheet="Pivot")

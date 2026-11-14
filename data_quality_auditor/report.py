@@ -31,6 +31,7 @@ _GROUP_TITLES = {
     Severity.WARNING: "Warning",
     Severity.SUGGESTION: "Suggestion",
 }
+_PREVIEW_CHARS = 80
 
 
 def write_report(
@@ -156,9 +157,11 @@ def _finding_title(item: Finding) -> str:
 def _example(text: str) -> list[str]:
     if text == "":
         return ["- Example: (blank)"]
-    if "\n" in text or "`" in text:
+    if _is_brief(text) and ("\n" in text or "`" in text):
         return ["- Example:", "", "```", text, "```"]
-    return [f"- Example: `{text}`"]
+    if _is_brief(text):
+        return [f"- Example: `{text}`"]
+    return [f"- Example: `{_one_line(text)}`"]
 
 
 def _row_numbers(item: Finding) -> str:
@@ -229,10 +232,18 @@ def _frequent(values: tuple[tuple[str, int], ...]) -> str:
 def _inline(text: str) -> str:
     if text == "":
         return "(blank)"
-    single_line = text.replace("\r", " ").replace("\n", " ")
-    if "`" in single_line:
-        return single_line
-    return f"`{single_line}`"
+    return f"`{_one_line(text)}`"
+
+
+def _is_brief(text: str) -> bool:
+    return len(text) <= _PREVIEW_CHARS and text.count("\n") <= 2
+
+
+def _one_line(text: str) -> str:
+    single = text.replace("\r", " ").replace("\n", " ").replace("`", "'")
+    if len(single) <= _PREVIEW_CHARS:
+        return single
+    return single[: _PREVIEW_CHARS - 3].rstrip() + "..."
 
 
 def _thresholds() -> str:

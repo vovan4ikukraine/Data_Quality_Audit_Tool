@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 from data_quality_auditor.checks import check_table
-from data_quality_auditor.loader import LoadError, load_file
+from data_quality_auditor.loader import LoadError, auditable_sheets, load_file
 from data_quality_auditor.policy import apply_policy
 from data_quality_auditor.profiler import profile_table
 from data_quality_auditor.report import write_report
@@ -40,10 +40,23 @@ def main() -> int:
     chosen = _choose_file(files)
     if chosen is None:
         return 1
+    sheet = None
+    if chosen.suffix.lower() == ".xlsx":
+        sheet = _choose_sheet(chosen)
+        if sheet is None:
+            return 1
     try:
-        report_path, findings_path = audit_file(chosen)
+        report_path, findings_path = audit_file(chosen, sheet)
     except LoadError as error:
-        print(error, file=sys.stderr)
+        if chosen.suffix.lower() == ".xlsx":
+            print("The file could not be processed.")
+            _pause()
+        else:
+            print(error, file=sys.stderr)
+        return 1
+    except Exception:
+        print("The file could not be processed.")
+        _pause()
         return 1
     print(f"Wrote {report_path}")
     print(f"Wrote {findings_path}")
@@ -87,20 +100,44 @@ def _pause() -> None:
 
 
 def _choose_file(files: tuple[Path, ...]) -> Path | None:
-    print("Choose a file:")
-    for number, path in enumerate(files, start=1):
-        print(f"{number}. {path.name}")
-    prompt = f"Enter a number from 1 to {len(files)}."
+    choice = _choose_number("Choose a file:", tuple(path.name for path in files))
+    if choice is None:
+        return None
+    return files[choice - 1]
+
+
+def _choose_sheet(path: Path) -> str | None:
+    try:
+        sheets = auditable_sheets(path)
+    except LoadError:
+        print("The file could not be processed.")
+        _pause()
+        return None
+    if not sheets:
+        print("The file could not be processed.")
+        _pause()
+        return None
+    choice = _choose_number("Choose a sheet:", sheets)
+    if choice is None:
+        return None
+    return sheets[choice - 1]
+
+
+def _choose_number(title: str, labels: tuple[str, ...]) -> int | None:
+    print(title)
+    for number, label in enumerate(labels, start=1):
+        print(f"{number}. {label}")
+    prompt = f"Enter a number from 1 to {len(labels)}."
     while True:
         try:
             entered = input("Number: ")
         except EOFError:
-            print("A file number is required.", file=sys.stderr)
+            print("A number is required.", file=sys.stderr)
             return None
         if entered.strip().isdigit():
             choice = int(entered.strip())
-            if 1 <= choice <= len(files):
-                return files[choice - 1]
+            if 1 <= choice <= len(labels):
+                return choice
         print(prompt)
 
 

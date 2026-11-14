@@ -7,18 +7,29 @@ from pathlib import Path
 
 import pandas as pd
 from charset_normalizer import from_bytes
-from openpyxl import load_workbook
-from openpyxl.utils.exceptions import InvalidFileException
+from openpyxl.packaging.relationship import get_dependents, get_rels_path
+from openpyxl.reader.excel import ExcelReader
+from openpyxl.styles.stylesheet import apply_stylesheet
+from openpyxl.worksheet._reader import WorkSheetParser
 
 SENTINELS = frozenset({"na", "n/a", "null", "none", "-", "--", "?", "#n/a"})
 DELIMITERS = (",", ";", "\t", "|")
 _ENCODING_CHAOS_LIMIT = 0.2
 _OLE_HEADER = b"\xd0\xcf\x11\xe0"
 _ZIP_HEADER = b"PK"
+_PIVOT_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable"
+_COULD_NOT_PROCESS = "The file could not be processed."
 
 
 class LoadError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class _SheetRef:
+    name: str
+    target: str
+    auditable: bool
 
 
 @dataclass(frozen=True)
@@ -46,6 +57,19 @@ class RawTable:
 def is_blank_or_sentinel(value: str) -> bool:
     text = value.strip().casefold()
     return text == "" or text in SENTINELS
+
+
+def auditable_sheets(path: str | Path) -> tuple[str, ...]:
+    source = _require_file(path)
+    if source.suffix.lower() != ".xlsx":
+        raise LoadError("The sheet option applies to .xlsx files.")
+    payload = _read_bytes(source)
+    _require_xlsx_container(payload)
+    package = _open_package(payload)
+    try:
+        return tuple(item.name for item in _sheet_refs(package) if item.auditable)
+    finally:
+        package.archive.close()
 
 
 def load_file(path: str | Path, sheet: str | None = None) -> RawTable:
@@ -188,33 +212,23 @@ def _parse_csv(
 
 def _load_xlsx(path: Path, payload: bytes, sheet: str | None) -> RawTable:
     _require_xlsx_container(payload)
+    package = _open_package(payload)
     try:
-        workbook = load_workbook(BytesIO(payload), data_only=False, read_only=False)
-    except (InvalidFileException, OSError, ValueError, KeyError) as exc:
-        raise LoadError(f"The workbook could not be read: {exc}") from exc
-    try:
-        names = list(workbook.sheetnames)
+        sheets = _sheet_refs(package)
+        names = [item.name for item in sheets]
         if not names:
-            raise LoadError("The workbook has no sheets.")
-        if sheet is None:
-            chosen = names[0]
-        elif sheet in names:
-            chosen = sheet
-        else:
-            available = ", ".join(names)
-            raise LoadError(f"Sheet '{sheet}' was not found. Available sheets: {available}.")
-        worksheet = workbook[chosen]
-        has_merged_cells = bool(worksheet.merged_cells.ranges)
-        headers, records, type_rows, row_numbers = _read_worksheet(worksheet)
+            raise LoadError(_COULD_NOT_PROCESS)
+        chosen = _choose_sheet(sheets, sheet)
+        headers, records, type_rows, row_numbers, has_merged = _read_sheet(package, chosen)
     finally:
-        workbook.close()
+        package.archive.close()
     if not records and all(name == "" for name in headers):
-        raise LoadError(f"The sheet is empty: {chosen}")
+        raise LoadError(f"The sheet is empty: {chosen.name}")
     frame = _string_frame(headers, records, row_numbers)
     cell_types = pd.DataFrame(type_rows, columns=frame.columns)
     cell_types.index = frame.index
     cell_types.index.name = frame.index.name
-    others = tuple(name for name in names if name != chosen)
+    others = tuple(name for name in names if name != chosen.name)
     return RawTable(
         path=str(path),
         frame=frame,
@@ -222,12 +236,146 @@ def _load_xlsx(path: Path, payload: bytes, sheet: str | None) -> RawTable:
         encoding=None,
         encoding_is_fallback=False,
         delimiter=None,
-        sheet=chosen,
+        sheet=chosen.name,
         other_sheets=others,
-        has_merged_cells=has_merged_cells,
+        has_merged_cells=has_merged,
         ragged_rows=(),
         empty_row_numbers=_empty_row_numbers(frame),
     )
+
+
+def _open_package(payload: bytes) -> ExcelReader:
+    package = None
+    try:
+        package = ExcelReader(
+            BytesIO(payload), read_only=True, data_only=False, keep_links=False
+        )
+        package.read_manifest()
+        package.read_strings()
+        package.read_workbook()
+        apply_stylesheet(package.archive, package.wb)
+    except Exception as exc:
+        if package is not None:
+            package.archive.close()
+        raise LoadError(_COULD_NOT_PROCESS) from exc
+    return package
+
+
+def _sheet_refs(package: ExcelReader) -> tuple[_SheetRef, ...]:
+    refs = []
+    for sheet, rel in package.parser.find_sheets():
+        kind = rel.Type or ""
+        is_worksheet = "worksheet" in kind and "chartsheet" not in kind
+        auditable = is_worksheet and not _has_pivot(package, rel.target)
+        if auditable:
+            auditable = _has_values(package, rel.target)
+        refs.append(_SheetRef(sheet.name, rel.target, auditable))
+    return tuple(refs)
+
+
+def _has_pivot(package: ExcelReader, target: str) -> bool:
+    rels_path = get_rels_path(target)
+    if rels_path not in package.valid_files:
+        return False
+    try:
+        rels = get_dependents(package.archive, rels_path)
+    except Exception:
+        return True
+    return any(rels.find(_PIVOT_REL))
+
+
+def _has_values(package: ExcelReader, target: str) -> bool:
+    try:
+        with package.archive.open(target) as source:
+            parser = _sheet_parser(package, source)
+            for _row_number, cells in parser.parse():
+                for cell in cells:
+                    if _excel_text(cell["value"]) != "":
+                        return True
+    except Exception:
+        return False
+    return False
+
+
+def _choose_sheet(sheets: tuple[_SheetRef, ...], sheet: str | None) -> _SheetRef:
+    if sheet is None:
+        for item in sheets:
+            if item.auditable:
+                return item
+        raise LoadError(_COULD_NOT_PROCESS)
+    for item in sheets:
+        if item.name == sheet:
+            if not item.auditable:
+                raise LoadError(_COULD_NOT_PROCESS)
+            return item
+    available = ", ".join(item.name for item in sheets)
+    raise LoadError(f"Sheet '{sheet}' was not found. Available sheets: {available}.")
+
+
+def _read_sheet(
+    package: ExcelReader, sheet: _SheetRef
+) -> tuple[list[str], list[list[str]], list[list[str]], list[int], bool]:
+    try:
+        with package.archive.open(sheet.target) as source:
+            parser = _sheet_parser(package, source)
+            parsed = list(parser.parse())
+            merged = parser.merged_cells
+            has_merged = bool(merged is not None and merged.mergeCell)
+    except Exception as exc:
+        raise LoadError(_COULD_NOT_PROCESS) from exc
+    lookup: dict[tuple[int, int], dict] = {}
+    last_row = 0
+    last_column = 0
+    for row_number, cells in parsed:
+        last_row = max(last_row, row_number)
+        for cell in cells:
+            lookup[(row_number, cell["column"])] = cell
+            if _excel_text(cell["value"]) != "":
+                last_column = max(last_column, cell["column"])
+    if last_column == 0:
+        raise LoadError(f"The sheet is empty: {sheet.name}")
+    headers = [
+        "" if (1, column) not in lookup else _excel_text(lookup[(1, column)]["value"]).strip()
+        for column in range(1, last_column + 1)
+    ]
+    records = []
+    type_rows = []
+    row_numbers = []
+    for row_number in range(2, last_row + 1):
+        values = []
+        kinds = []
+        for column in range(1, last_column + 1):
+            cell = lookup.get((row_number, column))
+            if cell is None:
+                values.append("")
+                kinds.append("")
+            else:
+                values.append(_excel_text(cell["value"]))
+                kinds.append(_parsed_type(cell))
+        records.append(values)
+        type_rows.append(kinds)
+        row_numbers.append(row_number)
+    return headers, records, type_rows, row_numbers, has_merged
+
+
+def _sheet_parser(package: ExcelReader, source) -> WorkSheetParser:
+    workbook = package.wb
+    return WorkSheetParser(
+        source,
+        package.shared_strings,
+        data_only=False,
+        epoch=workbook.epoch,
+        date_formats=set(getattr(workbook, "_date_formats", ())),
+        timedelta_formats=set(getattr(workbook, "_timedelta_formats", ())),
+    )
+
+
+def _parsed_type(cell: dict) -> str:
+    if _excel_text(cell["value"]) == "":
+        return ""
+    if cell["data_type"] == "d":
+        return "d"
+    return str(cell["data_type"])
 
 
 def _require_xlsx_container(payload: bytes) -> None:
@@ -237,46 +385,6 @@ def _require_xlsx_container(payload: bytes) -> None:
         )
     if not payload.startswith(_ZIP_HEADER):
         raise LoadError("The file is not a valid .xlsx workbook.")
-
-
-def _read_worksheet(
-    worksheet,
-) -> tuple[list[str], list[list[str]], list[list[str]], list[int]]:
-    if not worksheet.max_row or not worksheet.max_column:
-        raise LoadError(f"The sheet is empty: {worksheet.title}")
-    grid: list[list[tuple[str, str]]] = []
-    last_column = 0
-    for excel_row in worksheet.iter_rows(
-        max_row=worksheet.max_row,
-        max_col=worksheet.max_column,
-    ):
-        parsed: list[tuple[str, str]] = []
-        for cell in excel_row:
-            text = _excel_text(cell.value)
-            parsed.append((text, _excel_type(cell)))
-            if text != "":
-                last_column = max(last_column, cell.column)
-        grid.append(parsed)
-    if last_column == 0:
-        raise LoadError(f"The sheet is empty: {worksheet.title}")
-    header = _fit_row(grid[0], last_column)
-    headers = [text.strip() for text, _kind in header]
-    records = []
-    type_rows = []
-    row_numbers = []
-    for offset, row in enumerate(grid[1:], start=2):
-        fitted = _fit_row(row, last_column)
-        records.append([text for text, _kind in fitted])
-        type_rows.append([kind for _text, kind in fitted])
-        row_numbers.append(offset)
-    return headers, records, type_rows, row_numbers
-
-
-def _fit_row(row: list[tuple[str, str]], width: int) -> list[tuple[str, str]]:
-    fitted = row[:width]
-    if len(fitted) < width:
-        fitted.extend([("", "")] * (width - len(fitted)))
-    return fitted
 
 
 def _excel_text(value: object) -> str:
@@ -301,14 +409,6 @@ def _excel_text(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     return str(value)
-
-
-def _excel_type(cell) -> str:
-    if cell.value is None:
-        return ""
-    if cell.is_date:
-        return "d"
-    return cell.data_type
 
 
 def _string_frame(

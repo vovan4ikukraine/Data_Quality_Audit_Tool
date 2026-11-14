@@ -364,6 +364,24 @@ def test_the_output_directory_is_created(tmp_path):
     assert findings_path.exists()
 
 
+def test_long_values_in_the_markdown_are_shortened(tmp_path):
+    long_line = "YahooException: " + ("timeout " * 40)
+    many_lines = "\n".join(f"line {number}" for number in range(100))
+    report, _path = render(
+        tmp_path,
+        table(),
+        (passport(profile(frequent_values=((long_line, 19),))),),
+        (finding(example=many_lines),),
+        affected(),
+    )
+
+    assert long_line not in report
+    assert many_lines not in report
+    assert "line 99" not in report
+    assert "YahooException:" in report
+    assert "..." in report
+
+
 def test_report_names_follow_the_source_file(tmp_path):
     report_path, findings_path = write_report(
         table(path=r"D:\files\buys.xlsx"),
