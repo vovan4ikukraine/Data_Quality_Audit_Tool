@@ -13,6 +13,7 @@ venv/
 # Output reports & temporary audit files
 audit_report.md
 audit_findings.csv
+reports/
 sample_data/
 
 SPEC.md
