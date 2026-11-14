@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 venv/
 .env
+build/
+dist/
+data-audit.spec
 
 # Cursor / IDE
 .cursor/
@@ -14,6 +17,7 @@ venv/
 audit_report.md
 audit_findings.csv
 reports/
+input/
 sample_data/
 
 SPEC.md

@@ -7,8 +7,10 @@ from data_quality_auditor.models import ColumnKind, ColumnProfile, Finding, Seve
 from data_quality_auditor.policy import THRESHOLDS
 from data_quality_auditor.profiler import ColumnPassport
 
-REPORT_FILENAME = "audit_report.md"
-FINDINGS_FILENAME = "audit_findings.csv"
+def output_filenames(source: str | Path) -> tuple[str, str]:
+    stem = Path(source).stem
+    return f"{stem}_audit.md", f"{stem}_findings.csv"
+
 
 _FINDINGS_COLUMNS = (
     "column",
@@ -40,8 +42,9 @@ def write_report(
 ) -> tuple[Path, Path]:
     directory = Path.cwd() if output_dir is None else Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    report_path = directory / REPORT_FILENAME
-    findings_path = directory / FINDINGS_FILENAME
+    report_name, findings_name = output_filenames(table.path)
+    report_path = directory / report_name
+    findings_path = directory / findings_name
     report_path.write_text(
         _markdown(table, columns, findings),
         encoding="utf-8",

@@ -11,7 +11,7 @@ from data_quality_auditor.models import (
 )
 from data_quality_auditor.policy import THRESHOLDS
 from data_quality_auditor.profiler import ColumnPassport
-from data_quality_auditor.report import FINDINGS_FILENAME, REPORT_FILENAME, write_report
+from data_quality_auditor.report import output_filenames, write_report
 
 FINDING_COLUMNS = [
     "column",
@@ -127,7 +127,7 @@ def test_markdown_findings_and_csv_describe_the_same_finding(tmp_path):
     )
     found = read_findings(findings_path)
 
-    assert findings_path.name == FINDINGS_FILENAME
+    assert findings_path.name == output_filenames(table().path)[1]
     assert findings_path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert "## Findings" in report
     assert "#### email_format (email)" in report
@@ -157,7 +157,7 @@ def test_header_names_the_csv_file(tmp_path):
     assert "- Row numbers: the header is row 1 and the first record is row 2." in report
     assert "- Examples are copied from the raw data." in report
     assert "merged cells" not in report
-    assert b"\r\n" not in (tmp_path / REPORT_FILENAME).read_bytes()
+    assert b"\r\n" not in (tmp_path / output_filenames("orders.csv")[0]).read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -358,16 +358,33 @@ def test_the_output_directory_is_created(tmp_path):
         destination,
     )
 
-    assert report_path == destination / REPORT_FILENAME
-    assert findings_path == destination / FINDINGS_FILENAME
+    assert report_path == destination / "orders_audit.md"
+    assert findings_path == destination / "orders_findings.csv"
     assert report_path.exists()
     assert findings_path.exists()
+
+
+def test_report_names_follow_the_source_file(tmp_path):
+    report_path, findings_path = write_report(
+        table(path=r"D:\files\buys.xlsx"),
+        (),
+        (),
+        affected(),
+        tmp_path,
+    )
+
+    assert report_path.name == "buys_audit.md"
+    assert findings_path.name == "buys_findings.csv"
+    assert output_filenames(r"D:\files\buys.xlsx") == (
+        "buys_audit.md",
+        "buys_findings.csv",
+    )
 
 
 def test_without_an_output_dir_the_report_lands_in_the_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     report_path, findings_path = write_report(table(), (), (), affected())
 
-    assert report_path == tmp_path / REPORT_FILENAME
-    assert findings_path == tmp_path / FINDINGS_FILENAME
+    assert report_path == tmp_path / "orders_audit.md"
+    assert findings_path == tmp_path / "orders_findings.csv"
     assert report_path.exists()
