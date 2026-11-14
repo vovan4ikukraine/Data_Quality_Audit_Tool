@@ -328,7 +328,11 @@ def _epoch_zero(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
 
 
 def _numeric_outliers(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
-    if column.numbers is None or is_identifier_name(column.name):
+    if (
+        column.numbers is None
+        or is_identifier_name(column.name)
+        or column.passport.profile.epoch_unit is not None
+    ):
         return None
     present = column.numbers.dropna()
     if len(present) < OUTLIER_MINIMUM or present.nunique() <= OUTLIER_DISTINCT_LIMIT:
@@ -341,8 +345,6 @@ def _numeric_outliers(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
     low = q1 - OUTLIER_FENCE * iqr
     high = q3 + OUTLIER_FENCE * iqr
     outside = present.lt(low) | present.gt(high)
-    if column.passport.profile.epoch_unit is not None:
-        outside = outside & present.ne(0)
     return _hit(
         "numeric_outliers",
         Severity.SUGGESTION,
@@ -481,7 +483,7 @@ def _constant_column(column: _Column) -> tuple[Finding, pd.DataFrame] | None:
         substantive,
         column.population,
         column.values,
-        "This column has a single distinct value.",
+        "This column has a single distinct value, so check whether the analysis needs it.",
     )
 
 

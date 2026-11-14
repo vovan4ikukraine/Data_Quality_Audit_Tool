@@ -321,15 +321,7 @@ def test_epoch_zero_is_not_also_an_outlier(tmp_path):
         row_numbers=(32,),
         message="An epoch timestamp is zero.",
     )
-    assert_finding(
-        one(result, "numeric_outliers", "event_ts"),
-        severity=Severity.SUGGESTION,
-        row_count=1,
-        share=1 / 32,
-        example="1700100000",
-        row_numbers=(33,),
-        message="A value falls outside the 1.5 IQR fence.",
-    )
+    assert ("numeric_outliers", "event_ts") not in pairs(result)
 
 
 def test_number_stored_as_text_and_the_other_sheet(tmp_path):
@@ -660,7 +652,7 @@ def test_constant_column_starts_at_twenty_rows(tmp_path):
         share=1,
         example="Paid",
         row_numbers=(2, 3, 4, 5, 6),
-        message="This column has a single distinct value.",
+        message="This column has a single distinct value, so check whether the analysis needs it.",
     )
     assert len(affected(result, "constant_column", "status")) == 20
 
