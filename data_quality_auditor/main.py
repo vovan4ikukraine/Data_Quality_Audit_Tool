@@ -46,7 +46,11 @@ def main() -> int:
 
 
 def _reports_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "reports"
+    if getattr(sys, "frozen", False):
+        program_dir = Path(sys.executable).resolve().parent
+    else:
+        program_dir = Path(__file__).resolve().parent.parent
+    return program_dir / "reports"
 
 
 if __name__ == "__main__":
