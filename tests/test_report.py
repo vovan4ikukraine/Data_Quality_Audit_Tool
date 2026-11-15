@@ -147,9 +147,8 @@ def test_header_names_the_csv_file(tmp_path):
     report, _path = render(tmp_path, table(delimiter=";"), (), (), affected())
 
     assert report.startswith("# Data quality audit\n")
-    assert "- File: `orders.csv`" in report
-    assert "- Rows: 2" in report
-    assert "- Columns: 2" in report
+    assert "`orders.csv` · 2 rows · 2 columns" in report
+    assert "No findings." in report
     assert "- Encoding: utf-8" in report
     assert "- Delimiter: semicolon" in report
     assert "- Audited sheet: not applicable" in report
@@ -185,6 +184,7 @@ def test_header_names_the_workbook_sheet_and_merged_cells(tmp_path):
         affected(),
     )
 
+    assert "`orders.xlsx` · sheet Orders · 2 rows · 2 columns" in report
     assert "- Encoding: not applicable" in report
     assert "- Delimiter: not applicable" in report
     assert "- Audited sheet: Orders" in report
@@ -306,27 +306,24 @@ def test_passport_shows_each_kind(tmp_path):
     )
     report, _path = render(tmp_path, table(), columns, (), affected())
 
-    assert "## Column passport" in report
-    assert "- Kind: numeric" in report
-    assert "- Blank share: 10.0%" in report
-    assert "- Distinct ratio: 80.0%" in report
-    assert "- Epoch: seconds" in report
-    assert "- Minimum: -3" in report
-    assert "- Maximum: 12.5" in report
-    assert "- Median: 6.25" in report
-    assert "- Zero count: 1" in report
-    assert "- Negative count: 2" in report
-    assert "- Kind: datetime" in report
-    assert "- Recognized format: YYYY-MM-DD" in report
-    assert "- Minimum: 2024-01-02" in report
-    assert "- Maximum: 2024-03-05" in report
-    assert "- Recognized format: none" in report
-    assert "- Minimum: none" in report
-    assert "- Maximum: none" in report
-    assert "- Sentinel share: 20.0%" in report
-    assert "- Frequent values: `Paid` (3), (blank) (1)" in report
-    assert "### (unnamed)" in report
-    assert "- Distinct count: 0" in report
+    assert "## Column profile" in report
+    assert "| amount | numeric (seconds) | 10.0% | 0.0% | 4 | 80.0% |" in report
+    assert "| created_at | datetime | 0.0% | 0.0% | 2 | 100.0% |" in report
+    assert "| status | text | 0.0% | 20.0% | 2 | 50.0% |" in report
+    assert "| (unnamed) | text | 0.0% | 0.0% | 0 | 0.0% |" in report
+    assert "### (unnamed)" not in report
+    assert "| Minimum | -3 |" in report
+    assert "| Maximum | 12.5 |" in report
+    assert "| Median | 6.25 |" in report
+    assert "| Zero count | 1 |" in report
+    assert "| Negative count | 2 |" in report
+    assert "| Recognized format | YYYY-MM-DD |" in report
+    assert "| Minimum | 2024-01-02 |" in report
+    assert "| Maximum | 2024-03-05 |" in report
+    assert "| Recognized format | none |" in report
+    assert "| Minimum | none |" in report
+    assert "| Maximum | none |" in report
+    assert "| Frequent values | `Paid` (3), (blank) (1) |" in report
 
 
 def test_an_empty_audit_still_lists_the_thresholds(tmp_path):
@@ -334,9 +331,11 @@ def test_an_empty_audit_still_lists_the_thresholds(tmp_path):
     found = read_findings(findings_path)
 
     assert report.index("# Data quality audit") < report.index("## Findings")
-    assert report.index("## Findings") < report.index("## Column passport")
-    assert report.index("## Column passport") < report.index("## Thresholds")
-    assert "## Column passport\n\nNone." in report
+    assert report.index("## Findings") < report.index("## Column profile")
+    assert report.index("## Column profile") < report.index("## Technical details")
+    assert "## Column profile\n\nNone." in report
+    assert "\n---\n\n## Technical details\n" in report
+    assert "### Thresholds" in report
     assert found.empty
     assert list(found.columns) == FINDING_COLUMNS
     for name, value in THRESHOLDS:

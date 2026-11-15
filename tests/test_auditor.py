@@ -38,9 +38,9 @@ def test_a_fixture_runs_through_the_pipeline_into_valid_reports(tmp_path):
     assert findings_path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert b"\r\n" not in report_path.read_bytes()
     assert report.startswith("# Data quality audit\n")
-    assert f"- File: `{source}`" in report
-    assert "- Rows: 12" in report
-    assert "- Columns: 4" in report
+    assert f"`{source}`" in report
+    assert "12 rows" in report
+    assert "4 columns" in report
     assert "- Encoding: utf-8" in report
     assert "- Delimiter: comma" in report
     assert "- Audited sheet: not applicable" in report
@@ -48,18 +48,16 @@ def test_a_fixture_runs_through_the_pipeline_into_valid_reports(tmp_path):
     assert "- Row numbers: the header is row 1 and the first record is row 2." in report
     assert "- Examples are copied from the raw data." in report
     assert report.index("# Data quality audit") < report.index("## Findings")
-    assert report.index("## Findings") < report.index("## Column passport")
-    assert report.index("## Column passport") < report.index("## Thresholds")
+    assert report.index("## Findings") < report.index("## Column profile")
+    assert report.index("## Column profile") < report.index("## Technical details")
     assert report.index("### Error") < report.index("### Warning") < report.index("### Suggestion")
     assert "None." not in report
-    assert "### id" in report
+    assert "| id | identifier |" in report
+    assert "| amount | numeric |" in report
+    assert "| email | email |" in report
+    assert "| status | text |" in report
     assert "### amount" in report
-    assert "### email" in report
     assert "### status" in report
-    assert "- Kind: identifier" in report
-    assert "- Kind: numeric" in report
-    assert "- Kind: email" in report
-    assert "- Kind: text" in report
     for name, _value in THRESHOLDS:
         assert f"| {name} |" in report
     assert list(findings.columns) == FINDING_COLUMNS
@@ -77,22 +75,22 @@ def _read_findings(path):
 def _findings(report):
     severity = None
     title = None
-    fields = {}
+    lines = []
     found = set()
 
     def close():
-        nonlocal title, fields
+        nonlocal title, lines
         if title is None:
             return
-        found.add(_described(severity, title, fields))
+        found.add(_described(severity, title, lines))
         title = None
-        fields = {}
+        lines = []
 
     for line in report.splitlines():
         if line.startswith("#### "):
             close()
             title = line.removeprefix("#### ")
-            fields = {}
+            lines = []
             continue
         if line in {"### Error", "### Warning", "### Suggestion"}:
             close()
@@ -101,36 +99,39 @@ def _findings(report):
         if line.startswith("## "):
             close()
             continue
-        if title is None or not line.startswith("- "):
-            continue
-        label, value = line.removeprefix("- ").split(": ", 1)
-        fields[label] = value
+        if title is not None:
+            lines.append(line)
     close()
     return found
 
 
-def _described(severity, title, fields):
+def _described(severity, title, lines):
+    fields = {}
+    for line in lines:
+        if not line.startswith("- "):
+            continue
+        label, separator, value = line.removeprefix("- ").partition(": ")
+        if separator:
+            fields[label] = value
     column = fields["Column"]
     if column == "(dataset)":
         column = ""
-    check_id = _check_id(title, column)
+    suffix = f" ({column})"
+    check_id = title[: -len(suffix)] if column and title.endswith(suffix) else title
     return (
         check_id,
         column,
         severity,
-        _example(fields["Example"]),
+        _example(lines, fields),
         _row_numbers(fields["Row numbers"]),
     )
 
 
-def _check_id(title, column):
-    suffix = f" ({column})"
-    if column and title.endswith(suffix):
-        return title[: -len(suffix)]
-    return title
-
-
-def _example(value):
+def _example(lines, fields):
+    text = "\n".join(lines)
+    if "```" in text:
+        return text.split("```", 2)[1].strip("\n")
+    value = fields["Example"]
     if value == "(blank)":
         return ""
     assert value.startswith("`") and value.endswith("`")
@@ -138,6 +139,8 @@ def _example(value):
 
 
 def _row_numbers(value):
+    if value == "none":
+        return ()
     shown = value.split(" (first ", 1)[0]
     return tuple(int(number) for number in shown.split(", "))
 

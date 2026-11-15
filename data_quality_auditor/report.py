@@ -7,6 +7,7 @@ from data_quality_auditor.models import ColumnKind, ColumnProfile, Finding, Seve
 from data_quality_auditor.policy import THRESHOLDS
 from data_quality_auditor.profiler import ColumnPassport
 
+
 def output_filenames(source: str | Path) -> tuple[str, str]:
     stem = Path(source).stem
     return f"{stem}_audit.md", f"{stem}_findings.csv"
@@ -31,6 +32,15 @@ _GROUP_TITLES = {
     Severity.WARNING: "Warning",
     Severity.SUGGESTION: "Suggestion",
 }
+_COUNT_LABELS = (
+    (Severity.ERROR, "error", "errors"),
+    (Severity.WARNING, "warning", "warnings"),
+    (Severity.SUGGESTION, "suggestion", "suggestions"),
+)
+_PROFILE_HEADER = (
+    "| Column | Kind | Blank | Sentinel | Distinct | Distinct ratio |",
+    "| --- | --- | --- | --- | --- | --- |",
+)
 _PREVIEW_CHARS = 80
 
 
@@ -60,22 +70,228 @@ def _markdown(
     columns: tuple[ColumnPassport, ...],
     findings: tuple[Finding, ...],
 ) -> str:
-    sections = (
-        _header(table),
-        _findings(findings),
-        _passport(columns),
-        _thresholds(),
-    )
+    sections = [_summary(table, findings), _findings(findings), _profile(columns)]
+    details = _details(columns)
+    if details is not None:
+        sections.append(details)
+    sections.append(_technical(table))
     return "\n\n".join(sections) + "\n"
 
 
-def _header(table: RawTable) -> str:
+def _summary(table: RawTable, findings: tuple[Finding, ...]) -> str:
+    return "\n".join(
+        [
+            "# Data quality audit",
+            "",
+            _file_line(table),
+            "",
+            _counts(findings),
+        ]
+    )
+
+
+def _file_line(table: RawTable) -> str:
+    rows = _unit(len(table.frame), "row", "rows")
+    columns = _unit(int(table.frame.shape[1]), "column", "columns")
+    place = f"`{table.path}`"
+    if table.sheet is not None:
+        place = f"{place} · sheet {table.sheet}"
+    return f"{place} · {rows} · {columns}"
+
+
+def _counts(findings: tuple[Finding, ...]) -> str:
+    if not findings:
+        return "No findings."
+    parts = [
+        _unit(sum(item.severity == severity for item in findings), singular, plural)
+        for severity, singular, plural in _COUNT_LABELS
+    ]
+    return ", ".join(parts) + "."
+
+
+def _unit(count: int, singular: str, plural: str) -> str:
+    label = singular if count == 1 else plural
+    return f"{count} {label}"
+
+
+def _findings(findings: tuple[Finding, ...]) -> str:
+    lines = ["## Findings", ""]
+    for severity, title in _GROUP_TITLES.items():
+        lines.append(f"### {title}")
+        lines.append("")
+        group = [item for item in findings if item.severity == severity]
+        if not group:
+            lines.append("None.")
+            lines.append("")
+            continue
+        for item in group:
+            lines.extend(_finding(item))
+    return "\n".join(lines).rstrip()
+
+
+def _finding(item: Finding) -> list[str]:
+    column = " ".join(item.column.split())
+    title = item.check_id if not column else f"{item.check_id} ({column})"
+    shown = column if column else "(dataset)"
     lines = [
-        "# Data quality audit",
+        f"#### {title}",
         "",
-        f"- File: `{table.path}`",
-        f"- Rows: {len(table.frame)}",
-        f"- Columns: {table.frame.shape[1]}",
+        f"- Column: {shown}",
+        f"- Row count: {item.row_count}",
+        f"- Share: {_percent(item.share)}",
+    ]
+    lines.extend(_example_lines(item.example))
+    lines.extend(
+        [
+            f"- Row numbers: {_row_numbers(item)}",
+            f"- Message: {item.message}",
+            "",
+        ]
+    )
+    return lines
+
+
+def _example_lines(text: str) -> list[str]:
+    inline = _inline_example(text)
+    if inline is None:
+        return ["- Example:", "", "```", text, "```"]
+    return [f"- Example: {inline}"]
+
+
+def _inline_example(text: str) -> str | None:
+    if text == "":
+        return "(blank)"
+    if _is_brief(text) and ("\n" in text or "`" in text):
+        return None
+    if _is_brief(text):
+        return f"`{text}`"
+    return f"`{_one_line(text)}`"
+
+
+def _row_numbers(item: Finding) -> str:
+    if not item.row_numbers:
+        return "none"
+    shown = ", ".join(str(number) for number in item.row_numbers)
+    if item.row_count > len(item.row_numbers):
+        return f"{shown} (first {len(item.row_numbers)})"
+    return shown
+
+
+def _profile(columns: tuple[ColumnPassport, ...]) -> str:
+    lines = ["## Column profile", ""]
+    if not columns:
+        lines.append("None.")
+        return "\n".join(lines)
+    lines.extend(_PROFILE_HEADER)
+    for column in columns:
+        lines.append(_profile_row(column.profile))
+    return "\n".join(lines)
+
+
+def _profile_row(profile: ColumnProfile) -> str:
+    kind = profile.kind.value
+    if profile.epoch_unit is not None:
+        kind = f"{kind} ({profile.epoch_unit.value})"
+    return (
+        f"| {_table_cell(profile.name)} | {kind} | {_percent(profile.blank_share)} | "
+        f"{_percent(profile.sentinel_share)} | {profile.distinct_count} | "
+        f"{_percent(profile.distinct_ratio)} |"
+    )
+
+
+def _table_cell(name: str) -> str:
+    return _column_label(name).replace("|", "\\|")
+
+
+def _column_label(name: str) -> str:
+    text = " ".join(name.split())
+    return text if text else "(unnamed)"
+
+
+def _details(columns: tuple[ColumnPassport, ...]) -> str | None:
+    blocks = []
+    for column in columns:
+        block = _detail(column.profile)
+        if block:
+            blocks.append(block)
+    if not blocks:
+        return None
+    lines = ["## Column details", ""]
+    for block in blocks:
+        lines.extend(block)
+    return "\n".join(lines).rstrip()
+
+
+def _detail(profile: ColumnProfile) -> list[str]:
+    rows = _metric_rows(profile)
+    if not rows:
+        return []
+    return [
+        f"### {_column_label(profile.name)}",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        *rows,
+        "",
+    ]
+
+
+def _metric_rows(profile: ColumnProfile) -> list[str]:
+    metrics: list[tuple[str, str]] = []
+    if profile.kind is ColumnKind.NUMERIC:
+        metrics.extend(
+            [
+                ("Minimum", _number(profile.minimum)),
+                ("Maximum", _number(profile.maximum)),
+                ("Median", _number(profile.median)),
+                ("Zero count", _whole(profile.zero_count)),
+                ("Negative count", _whole(profile.negative_count)),
+            ]
+        )
+    if profile.kind is ColumnKind.DATETIME:
+        metrics.extend(
+            [
+                ("Recognized format", profile.recognized_format or "none"),
+                ("Minimum", profile.datetime_minimum or "none"),
+                ("Maximum", profile.datetime_maximum or "none"),
+            ]
+        )
+    if profile.frequent_values:
+        metrics.append(("Frequent values", _frequent(profile.frequent_values)))
+    return [f"| {name} | {_metric_cell(value)} |" for name, value in metrics]
+
+
+def _metric_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def _frequent(values: tuple[tuple[str, int], ...]) -> str:
+    return ", ".join(f"{_inline(value)} ({count})" for value, count in values)
+
+
+def _inline(text: str) -> str:
+    if text == "":
+        return "(blank)"
+    return f"`{_one_line(text)}`"
+
+
+def _is_brief(text: str) -> bool:
+    return len(text) <= _PREVIEW_CHARS and text.count("\n") <= 2
+
+
+def _one_line(text: str) -> str:
+    single = text.replace("\r", " ").replace("\n", " ").replace("`", "'")
+    if len(single) <= _PREVIEW_CHARS:
+        return single
+    return single[: _PREVIEW_CHARS - 3].rstrip() + "..."
+
+
+def _technical(table: RawTable) -> str:
+    lines = [
+        "---",
+        "",
+        "## Technical details",
+        "",
         f"- Encoding: {_encoding(table)}",
         f"- Delimiter: {_delimiter(table)}",
         f"- Audited sheet: {_sheet(table.sheet)}",
@@ -85,6 +301,7 @@ def _header(table: RawTable) -> str:
     ]
     if table.has_merged_cells:
         lines.append("- Structural warning: this sheet contains merged cells.")
+    lines.extend(["", _threshold_table()])
     return "\n".join(lines)
 
 
@@ -117,138 +334,9 @@ def _other_sheets(names: tuple[str, ...]) -> str:
     return ", ".join(names)
 
 
-def _findings(findings: tuple[Finding, ...]) -> str:
-    lines = ["## Findings", ""]
-    for severity, title in _GROUP_TITLES.items():
-        lines.append(f"### {title}")
-        lines.append("")
-        group = [item for item in findings if item.severity == severity]
-        if not group:
-            lines.append("None.")
-            lines.append("")
-            continue
-        for item in group:
-            lines.extend(_finding(item))
-    return "\n".join(lines).rstrip()
-
-
-def _finding(item: Finding) -> list[str]:
-    column = item.column if item.column else "(dataset)"
-    return [
-        f"#### {_finding_title(item)}",
-        "",
-        f"- Column: {column}",
-        f"- Row count: {item.row_count}",
-        f"- Share: {_percent(item.share)}",
-        *_example(item.example),
-        f"- Row numbers: {_row_numbers(item)}",
-        f"- Message: {item.message}",
-        "",
-    ]
-
-
-def _finding_title(item: Finding) -> str:
-    if not item.column:
-        return item.check_id
-    column = " ".join(item.column.split())
-    return f"{item.check_id} ({column})"
-
-
-def _example(text: str) -> list[str]:
-    if text == "":
-        return ["- Example: (blank)"]
-    if _is_brief(text) and ("\n" in text or "`" in text):
-        return ["- Example:", "", "```", text, "```"]
-    if _is_brief(text):
-        return [f"- Example: `{text}`"]
-    return [f"- Example: `{_one_line(text)}`"]
-
-
-def _row_numbers(item: Finding) -> str:
-    if not item.row_numbers:
-        return "none"
-    shown = ", ".join(str(number) for number in item.row_numbers)
-    if item.row_count > len(item.row_numbers):
-        return f"{shown} (first {len(item.row_numbers)})"
-    return shown
-
-
-def _passport(columns: tuple[ColumnPassport, ...]) -> str:
-    lines = ["## Column passport", ""]
-    if not columns:
-        lines.append("None.")
-        return "\n".join(lines)
-    for column in columns:
-        lines.extend(_column(column.profile))
-    return "\n".join(lines).rstrip()
-
-
-def _column(profile: ColumnProfile) -> list[str]:
-    name = profile.name if profile.name else "(unnamed)"
+def _threshold_table() -> str:
     lines = [
-        f"### {name}",
-        "",
-        f"- Kind: {profile.kind.value}",
-        f"- Blank share: {_percent(profile.blank_share)}",
-        f"- Sentinel share: {_percent(profile.sentinel_share)}",
-        f"- Distinct count: {profile.distinct_count}",
-        f"- Distinct ratio: {_percent(profile.distinct_ratio)}",
-    ]
-    if profile.epoch_unit is not None:
-        lines.append(f"- Epoch: {profile.epoch_unit.value}")
-    if profile.kind is ColumnKind.NUMERIC:
-        lines.extend(_numeric_lines(profile))
-    if profile.kind is ColumnKind.DATETIME:
-        lines.extend(_datetime_lines(profile))
-    if profile.frequent_values:
-        lines.append(f"- Frequent values: {_frequent(profile.frequent_values)}")
-    lines.append("")
-    return lines
-
-
-def _numeric_lines(profile: ColumnProfile) -> list[str]:
-    return [
-        f"- Minimum: {_number(profile.minimum)}",
-        f"- Maximum: {_number(profile.maximum)}",
-        f"- Median: {_number(profile.median)}",
-        f"- Zero count: {_whole(profile.zero_count)}",
-        f"- Negative count: {_whole(profile.negative_count)}",
-    ]
-
-
-def _datetime_lines(profile: ColumnProfile) -> list[str]:
-    recognized = profile.recognized_format or "none"
-    return [
-        f"- Recognized format: {recognized}",
-        f"- Minimum: {profile.datetime_minimum or 'none'}",
-        f"- Maximum: {profile.datetime_maximum or 'none'}",
-    ]
-
-
-def _frequent(values: tuple[tuple[str, int], ...]) -> str:
-    return ", ".join(f"{_inline(value)} ({count})" for value, count in values)
-
-
-def _inline(text: str) -> str:
-    if text == "":
-        return "(blank)"
-    return f"`{_one_line(text)}`"
-
-
-def _is_brief(text: str) -> bool:
-    return len(text) <= _PREVIEW_CHARS and text.count("\n") <= 2
-
-
-def _one_line(text: str) -> str:
-    single = text.replace("\r", " ").replace("\n", " ").replace("`", "'")
-    if len(single) <= _PREVIEW_CHARS:
-        return single
-    return single[: _PREVIEW_CHARS - 3].rstrip() + "..."
-
-
-def _thresholds() -> str:
-    lines = [
-        "## Thresholds",
+        "### Thresholds",
         "",
         "| Threshold | Value |",
         "| --- | --- |",

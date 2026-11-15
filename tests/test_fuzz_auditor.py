@@ -519,11 +519,15 @@ def _assert_contract(sample, path, report_path, findings_path):
     assert findings_path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert b"\r\n" not in report_path.read_bytes()
     assert report.startswith("# Data quality audit\n")
-    assert f"- File: `{path}`" in report
-    assert f"- Rows: {len(sample.rows)}" in report
-    assert f"- Columns: {len(sample.headers)}" in report
-    assert report.index("## Findings") < report.index("## Column passport")
-    assert report.index("## Column passport") < report.index("## Thresholds")
+    assert f"`{path}`" in report
+    rows = len(sample.rows)
+    row_label = "row" if rows == 1 else "rows"
+    columns = len(sample.headers)
+    column_label = "column" if columns == 1 else "columns"
+    assert f"{rows} {row_label}" in report
+    assert f"{columns} {column_label}" in report
+    assert report.index("## Findings") < report.index("## Column profile")
+    assert report.index("## Column profile") < report.index("## Technical details")
     assert report.index("### Error") < report.index("### Warning") < report.index("### Suggestion")
     for name, _value in THRESHOLDS:
         assert f"| {name} |" in report
