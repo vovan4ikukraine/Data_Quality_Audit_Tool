@@ -41,6 +41,15 @@ def audit_file(
 
 
 def main() -> int:
+    try:
+        return _run()
+    except KeyboardInterrupt:
+        print()
+        print("Stopped.")
+        return 1
+
+
+def _run() -> int:
     print("Data quality audit")
     print("The source file is not changed.")
     print(f"Reports are saved in {_reports_dir()}.")
