@@ -15,6 +15,6 @@ dist/
 # Output reports & temporary audit files
 audit_report.md
 audit_findings.csv
-sample_data
-
+input/
+reports/
 SPEC.md

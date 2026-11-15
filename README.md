@@ -68,6 +68,8 @@ dist\Data Quality Auditor\Data Quality Auditor.exe
 # HOW TO USE
 
 1. Put the files `.CSV` or `.XLSX` you want to process into folder `/input`
+- `/input` folder will be created when you run the app if it is not there yet.
+- `/reports` folder will be created when you process the file if it is not there yet.
 - Copy files from `/sample_data` to `/input` to test sample files or use your owns.
 2. Start the programma
 3. The program prints a numbered list of the files in `/input`. Type the number and press Enter. 
