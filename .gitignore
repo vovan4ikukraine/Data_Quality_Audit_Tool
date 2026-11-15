@@ -6,7 +6,6 @@ venv/
 .env
 build/
 dist/
-data-audit.spec
 
 # Cursor / IDE
 .cursor/
