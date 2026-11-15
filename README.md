@@ -31,6 +31,10 @@ The program works such:
 
 # INSTALL
 
+Install Python 3.11 or newer if it is not already installed: https://www.python.org/downloads/
+On Windows, enable "Add python.exe to PATH" during setup.
+On macOS, use `python3` instead of `python` in the commands below if `python` is not found.
+
 ## Way 1 - run from source
 
 ```bash
@@ -50,7 +54,7 @@ To run tests in the app
 python -m pytest
 ```
 
-## Way 2 - build the Windows .exe (WINDOWS olny)
+## Way 2 - build the Windows .exe (WINDOWS only)
 
 Do Way 1 without `python -m data_quality_auditor`
 
@@ -63,7 +67,7 @@ python -m PyInstaller --noconfirm data-audit.spec
 Run .exe in folder:
 dist\Data Quality Auditor\Data Quality Auditor.exe
 
-## Way 3 - download the ready Windows folder with .exe (WINDOWS olny)
+## Way 3 - download the ready Windows folder with .exe (WINDOWS only)
 
 1. Open the GitHub Releases page.
 2. Download Data-Quality-Auditor-windows.zip and unzip it. 
