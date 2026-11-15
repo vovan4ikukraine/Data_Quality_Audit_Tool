@@ -25,7 +25,7 @@ The program works such:
 
 `checks.py` - examines columns for anomalies and errors based on their established profiles. It identifies invalid dates, text where numeric data is expected, missing IDs, outliers, and structural irregularities. It flags all problematic areas and compiles an initial list of findings.
 
-`policy.py` - a filter for quality thresholds and policies. It applies business rules. If the number of errors for a given data check are within the permitted limit, the finding is either downgraded or filtered out to prevent the report from false findings. It also determines the final severity level.
+`policy.py` - holds the thresholds. `checks.py` already sets Error, Warning, or Suggestion. This module only changes `missing_values`: under 5% of rows it stays a suggestion, and at 5% or more it becomes a warning. It does not remove findings.
 
 `report.py` - takes the refined audit results and packages them into formats that are human and machine readable. It creates a detailed Markdown report completed with a header, technical warnings, and a column specification summary as well as a structured CSV log of findings for further analysis and precise fixes.
 
@@ -44,6 +44,11 @@ python -m data_quality_auditor
 ```
 
 On macOS or Linux the activate line is `source venv/bin/activate`
+
+To run tests in the app
+```bash
+python -m pytest
+```
 
 ## Way 2 - build the Windows .exe (WINDOWS olny)
 
