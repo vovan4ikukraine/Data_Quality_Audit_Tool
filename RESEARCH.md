@@ -65,7 +65,7 @@ Entity 2: class
 ## Treating unusual values ​​as errors
 **Wrong approach** What didn’t work: The initial approach treated negative or unusual values ​​as definitive errors.
 **Why:** Without business context, it is impossible to determine whether a specific value is actually incorrect. For instance, a negative value might be perfectly valid in one system while representing an error in another.
-**What I learned:** A tool must distinguish between a potential issue and a confirmed error. To address this, I introduced severity and confidence levels and adopted more cautious language when providing recommendations.
+**What I learned:** A tool must distinguish between a potential issue and a confirmed error. To address this, I introduced severity levels and adopted more cautious language when providing recommendations.
 
 ## What else I have learned
 
@@ -79,7 +79,7 @@ The utility replicates an analyst's initial manual pass in Excel (checking missi
 Built bottom-up based on dependencies: core data models Each module was verified via `pytest` before moving to the next.
 
 ## 3. Key Technical Decisions & Edge Cases
-* **Read-Only Audit vs. Auto-Fixing:** Early plans to overwrite CSVs were dropped. Without domain context, unusual values cannot be definitively labeled wrong. Findings are categorized into `Error`, `Warning`, and `Suggestion` via threshold policies.
+* **Read-Only Audit vs. Auto-Fixing:** Early plans to overwrite CSVs were dropped. Without domain context, unusual values cannot be definitively labeled wrong. Findings are categorized into `Error`, `Warning`, and `Suggestion`.
 * **Excel Defensiveness (`openpyxl`):** Reads cached formula values (`data_only=True`) rather than raw formula strings (`=IF()`). Skips chart and pivot sheets, detects side-by-side tables separated by empty columns, and flags merged cells with a structural warning without attempting layout reconstruction.
 * **Column Tokenization:** Excluded generic boolean keywords (`is`, `flag`, `active`) as `0/1` and `true/false` are already handled as numeric/text.
 * **Semantics Over Raw Types:** Excluded  timestamps from IQR outlier detection, as large sequential timestamps trigger false positives under standard numerical distribution checks.

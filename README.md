@@ -36,7 +36,7 @@ The program works such:
 ```bash
 cd path/to/your/folder
 git clone https://github.com/vovan4ikukraine/Data_Quality_Audit_Tool
-cd data_quality_auditor
+cd Data_Quality_Audit_Tool
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
@@ -78,7 +78,7 @@ dist\Data Quality Auditor\Data Quality Auditor.exe
 6. Repeat if needed
 
 - For dirty.csv the Markdown file is `reports/dirty_audit.md`. Header is row 1, first record is row 2. 
-- The CSV file is `reports/dirty_audit.csv`. The CSV columns are column, check_id, severity, row_number, raw_value, and message. One row in that CSV is one affected cell. Row numbers match the spreadsheet: the header is row 1 and the first record is row 2.
+- The CSV file is `reports/dirty_findings.csv`. The CSV columns are column, check_id, severity, row_number, raw_value, and message. One row in that CSV is one affected cell. Row numbers match the spreadsheet: the header is row 1 and the first record is row 2.
 
 - Severity is `Error` (unusable value or broken structure), `Warning` (inspect before cleaning), `Suggestion` (cosmetic or a distribution question). 
 - Name rules are limited to email, date, and identifier tokens. 
