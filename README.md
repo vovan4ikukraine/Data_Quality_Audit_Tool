@@ -71,7 +71,7 @@ dist\Data Quality Auditor\Data Quality Auditor.exe
 
 1. Open the GitHub Releases page.
 2. Download Data-Quality-Auditor-windows.zip and unzip it. 
-3. You get the exe, and empty input and reports foleders. 
+3. You have got the .exe and empty input and reports folders. 
 4. Run.
 
 # HOW TO USE
